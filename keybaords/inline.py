@@ -38,7 +38,7 @@ def get_schedule_preview_keyboard() -> InlineKeyboardMarkup:
 def get_schedule_view_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📆 Вся неделя", callback_data="sch_full_week"),
+            InlineKeyboardButton(text="📅 Расписание на неделю", callback_data="sch_full_week"),
             InlineKeyboardButton(text="✏️ Изменить", callback_data="create_schedule")
         ],
         [
@@ -66,21 +66,6 @@ def get_homework_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def get_homework_date_picker_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Сегодня", callback_data="hw_date_today"),
-            InlineKeyboardButton(text="Завтра", callback_data="hw_date_tomorrow")
-        ],
-        [
-            InlineKeyboardButton(text="⌨️ Ввести дату вручную", callback_data="hw_date_custom")
-        ],
-        [
-            InlineKeyboardButton(text="❌ Отмена", callback_data="nav_menu_homework")
-        ]
-    ])
-
-
 def get_homework_preview_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -96,29 +81,22 @@ def get_homework_preview_keyboard() -> InlineKeyboardMarkup:
 def get_settings_menu_keyboard(settings) -> InlineKeyboardMarkup:
     sch_status = "🔔" if settings.schedule_notifications else "🔕"
     hw_status = "🔔" if settings.homework_notifications else "🔕"
-    tom_status = "🔔" if settings.tomorrow_notifications else "🔕"
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text=f"{sch_status} Расписание: {settings.schedule_notification_time}",
+                text=f"{sch_status} Утреннее расписание: {settings.schedule_notification_time}",
                 callback_data="set_time_schedule"
             )
         ],
         [
             InlineKeyboardButton(
-                text=f"{hw_status} ДЗ: {settings.homework_notification_time}",
+                text=f"{hw_status} Вечернее ДЗ: {settings.homework_notification_time}",
                 callback_data="set_time_homework"
             )
         ],
         [
-            InlineKeyboardButton(
-                text=f"{tom_status} Завтрашние уроки: {settings.tomorrow_notification_time}",
-                callback_data="set_time_tomorrow"
-            )
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Время уроков", callback_data="set_lesson_times"),
+            InlineKeyboardButton(text="⚙️ Время начала уроков", callback_data="set_lesson_times"),
             InlineKeyboardButton(text="🌍 Часовой пояс", callback_data="set_timezone")
         ],
         [
@@ -168,7 +146,7 @@ def get_timezone_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🇦🇪 UTC+4", callback_data="tz_UTC+4")
         ],
         [
-            InlineKeyboardButton(text="⌨️ Ввести вручную (напр. UTC+2)", callback_data="tz_custom")
+            InlineKeyboardButton(text="⌨️ Ввести вручную", callback_data="tz_custom")
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="nav_menu_settings")

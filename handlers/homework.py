@@ -3,7 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 
 from database.base import async_session
 from database.requests import (
@@ -11,16 +11,14 @@ from database.requests import (
     add_user_homeworks,
     get_user_homework_by_date,
     get_all_user_active_homeworks,
-    toggle_homework_status,
+    get_user_full_schedule,
     delete_user_completed_homeworks
 )
-from services.parser import parse_homework_text, parse_date_string
+from services.parser import parse_homework_text, find_next_lesson_date
 from keybaords.inline import (
     get_homework_menu_keyboard,
-    get_homework_date_picker_keyboard,
     get_homework_preview_keyboard,
-    get_back_keyboard,
-    get_main_menu_keyboard
+    get_back_keyboard
 )
 
 router = Router()
@@ -28,8 +26,6 @@ router = Router()
 
 class HomeworkState(StatesGroup):
     waiting_for_text = State()
-    waiting_for_date = State()
-    waiting_for_custom_date = State()
     preview = State()
 
 
@@ -57,9 +53,8 @@ async def start_add_homework(callback: CallbackQuery, state: FSMContext):
     await state.set_state(HomeworkState.waiting_for_text)
     text = (
         "➕ **Добавление ДЗ**\n\n"
-        "Отправь задание текстом в формате:\n"
-        "`Предмет - Задание`\n\n"
-        "**Пример нескольких заданий:**\n"
+        "Просто отправь предметы и задания. Бот сам определит, к какому дню их привязать по твоему расписанию!\n\n"
+        "**Пример:**\n"
         "Математика - стр 45 №12-15\n"
         "Русский язык - упражнение 78\n"
         "Информатика - сделать презентацию"
@@ -75,71 +70,28 @@ async def process_hw_text(message: Message, state: FSMContext):
         await message.answer("❌ Не удалось распознать формат ДЗ. Попробуй: `Предмет - Задание`")
         return
 
-    await state.update_data(parsed_hw=parsed)
-    await state.set_state(HomeworkState.waiting_for_date)
-
-    await message.answer(
-        f"📝 Найдено **{len(parsed)}** заданий.\n\nВыберите дату выполнения:",
-        reply_markup=get_homework_date_picker_keyboard(),
-        parse_mode="Markdown"
-    )
-
-
-@router.callback_query(F.data.startswith("hw_date_"), HomeworkState.waiting_for_date)
-async def process_hw_date_choice(callback: CallbackQuery, state: FSMContext):
-    choice = callback.data.replace("hw_date_", "")
     today = date.today()
+    async with async_session() as session:
+        user = await get_or_create_user(session, message.from_user.id)
+        user_schedules = await get_user_full_schedule(session, user.id)
 
-    if choice == "today":
-        selected_date = today
-    elif choice == "tomorrow":
-        selected_date = today + timedelta(days=1)
-    elif choice == "custom":
-        await state.set_state(HomeworkState.waiting_for_custom_date)
-        await callback.message.edit_text(
-            "⌨️ Введите дату выполнения (например: `сегодня`, `завтра`, `25.09`):",
-            parse_mode="Markdown"
-        )
-        await callback.answer()
-        return
-    else:
-        selected_date = today
+    # Автоматически определяем дату для каждого предмета
+    for item in parsed:
+        item["due_date"] = find_next_lesson_date(item["subject"], user_schedules, today)
 
-    await _show_hw_preview(callback.message, state, selected_date, is_callback=True)
-    await callback.answer()
-
-
-@router.message(HomeworkState.waiting_for_custom_date)
-async def process_hw_custom_date(message: Message, state: FSMContext):
-    dt = parse_date_string(message.text)
-    if not dt:
-        await message.answer("❌ Неверный формат даты. Введите, например: `25.09` или `завтра`")
-        return
-    await _show_hw_preview(message, state, dt, is_callback=False)
-
-
-async def _show_hw_preview(target_obj, state: FSMContext, due_date: date, is_callback: bool):
-    data = await state.get_data()
-    parsed_hw = data.get("parsed_hw", [])
-
-    for item in parsed_hw:
-        item["due_date"] = due_date
-
-    await state.update_data(parsed_hw=parsed_hw)
+    await state.update_data(parsed_hw=parsed)
     await state.set_state(HomeworkState.preview)
 
-    text = f"📝 **Проверь домашнее задание на {due_date.strftime('%d.%m.%Y')}:**\n\n"
-    for idx, item in enumerate(parsed_hw, 1):
-        text += f"{idx}. **{item['subject']}**\n   {item['task_text']}\n\n"
+    text = "📝 **Автоматически распознано ДЗ:**\n\n"
+    for idx, item in enumerate(parsed, 1):
+        dt_str = item["due_date"].strftime("%d.%m (%A)")
+        text += f"{idx}. **{item['subject']}** (к уроку: `{dt_str}`)\n   {item['task_text']}\n\n"
 
-    if is_callback:
-        await target_obj.edit_text(text, reply_markup=get_homework_preview_keyboard(), parse_mode="Markdown")
-    else:
-        await target_obj.answer(text, reply_markup=get_homework_preview_keyboard(), parse_mode="Markdown")
+    await message.answer(text, reply_markup=get_homework_preview_keyboard(), parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "save_homework", HomeworkState.preview)
-async def save_homework_confirm(callback: CallbackQuery, state: FSMContext):
+async def save_homework_confirm(callback: CallbackQuery, state: FSMContext, bot):
     data = await state.get_data()
     parsed_hw = data.get("parsed_hw", [])
 

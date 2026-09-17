@@ -14,10 +14,6 @@ WEEKDAYS_MAP = {
 
 
 def parse_schedule_text(text: str) -> Dict[int, List[Tuple[int, str]]]:
-    """
-    Разбирает произвольный текстовый ввод расписания.
-    Возвращает dict: { weekday_index (0..6): [(lesson_num, subject_name), ...] }
-    """
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     result: Dict[int, List[Tuple[int, str]]] = {}
     current_weekday: Optional[int] = None
@@ -29,8 +25,10 @@ def parse_schedule_text(text: str) -> Dict[int, List[Tuple[int, str]]]:
             if current_weekday not in result:
                 result[current_weekday] = []
 
-            # Проверяем, есть ли уроки в этой же строке после двоеточия или тире
-            content_after_day = re.sub(r'^(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|mon|tue|wed|thu|fri|sat|sun)[:\-\s]*', '', line, flags=re.IGNORECASE).strip()
+            content_after_day = re.sub(
+                r'^(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс|mon|tue|wed|thu|fri|sat|sun)[:\-\s]*',
+                '', line, flags=re.IGNORECASE
+            ).strip()
             if content_after_day:
                 _process_lessons_block(content_after_day, result[current_weekday])
             continue
@@ -45,21 +43,18 @@ def _detect_weekday_in_line(line: str) -> Optional[int]:
     clean_line = line.lower().strip()
     for day_idx, aliases in WEEKDAYS_MAP.items():
         for alias in aliases:
-            # Соответствие в начале строки или как отд. слово
             if re.match(rf'^{alias}(?:\b|[:\-\s]|$)', clean_line):
                 return day_idx
     return None
 
 
 def _process_lessons_block(raw_text: str, lesson_list: List[Tuple[int, str]]):
-    # Поддерживаем разделители запятые, точки с запятой или перенос строки
     parts = re.split(r'[,;]\s*', raw_text)
     for part in parts:
         part = part.strip()
         if not part:
             continue
 
-        # Поиск номера урока в начале: "1. Математика", "1) Русский", "1 Математика"
         match = re.match(r'^(\d+)[\.\)\s\-]+(.+)$', part)
         if match:
             num = int(match.group(1))
@@ -67,7 +62,6 @@ def _process_lessons_block(raw_text: str, lesson_list: List[Tuple[int, str]]):
             if subject:
                 lesson_list.append((num, subject))
         else:
-            # Если номера нет, назначаем авто-инкремент
             next_num = max([l[0] for l in lesson_list], default=0) + 1
             subject = part.capitalize()
             if subject:
@@ -75,11 +69,6 @@ def _process_lessons_block(raw_text: str, lesson_list: List[Tuple[int, str]]):
 
 
 def parse_homework_text(text: str) -> List[Dict[str, str]]:
-    """
-    Разбирает текст ДЗ формата:
-    Предмет - Задание
-    Предмет: Задание
-    """
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     items = []
 
@@ -103,15 +92,32 @@ def parse_homework_text(text: str) -> List[Dict[str, str]]:
     return items
 
 
+def find_next_lesson_date(subject: str, user_schedules: list, current_date: date) -> date:
+    """Автоматически находит ближайший следующий день, когда будет этот предмет."""
+    subject_clean = subject.strip().lower()
+    days_with_subject = set()
+
+    for item in user_schedules:
+        if item.subject.strip().lower() == subject_clean:
+            days_with_subject.add(item.weekday)
+
+    if not days_with_subject:
+        # Если предмета нет в расписании, ставим на завтра
+        return current_date + timedelta(days=1)
+
+    # Ищем ближайший день недели начиная с завтра
+    for i in range(1, 8):
+        check_date = current_date + timedelta(days=i)
+        if check_date.weekday() in days_with_subject:
+            return check_date
+
+    return current_date + timedelta(days=1)
+
+
 def parse_time_string(time_str: str) -> Optional[str]:
-    """
-    Преобразует строковый ввод ("07:00", "7:00", "19 30") в формат HH:MM.
-    Возвращает None, если формат некорректен.
-    """
     cleaned = re.sub(r'[^\d:\s]', '', time_str.strip())
     match = re.match(r'^(\d{1,2})[:\s]+(\d{2})$', cleaned)
     if not match:
-        # Попытка разобрать просто час
         match_hour = re.match(r'^(\d{1,2})$', cleaned)
         if match_hour:
             h = int(match_hour.group(1))
@@ -124,44 +130,3 @@ def parse_time_string(time_str: str) -> Optional[str]:
         return f"{h:02d}:{m:02d}"
     return None
 
-
-def parse_date_string(date_str: str, base_date: Optional[date] = None) -> Optional[date]:
-    """
-    Распознает варианты 'сегодня', 'завтра', 'послезавтра', '23.09', '23.09.2026'
-    """
-    if base_date is None:
-        base_date = date.today()
-
-    clean_str = date_str.strip().lower()
-
-    if clean_str == "сегодня":
-        return base_date
-    if clean_str == "завтра":
-        return base_date + timedelta(days=1)
-    if clean_str == "послезавтра":
-        return base_date + timedelta(days=2)
-
-    # 23.09 или 23.09.2026
-    match_dt = re.match(r'^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$', clean_str)
-    if match_dt:
-        day = int(match_dt.group(1))
-        month = int(match_dt.group(2))
-        year = int(match_dt.group(3)) if match_dt.group(3) else base_date.year
-        try:
-            res_date = date(year, month, day)
-            if res_date < base_date and not match_dt.group(3):
-                res_date = date(year + 1, month, day)
-            return res_date
-        except ValueError:
-            return None
-
-    # Поиск по дню недели ("в понедельник", "пн")
-    for day_idx, aliases in WEEKDAYS_MAP.items():
-        for alias in aliases:
-            if alias in clean_str:
-                days_ahead = day_idx - base_date.weekday()
-                if days_ahead <= 0:
-                    days_ahead += 7
-                return base_date + timedelta(days=days_ahead)
-
-    return None
